@@ -796,7 +796,7 @@ static int  tcp_opt_add_toa(struct ip_vs_conn *cp,
 }
 
 #ifdef CONFIG_IP_VS_IPV6
-static int sk_buff tcp_opt_add_toa_v6(struct ip_vs_conn *cp,
+static int tcp_opt_add_toa_v6(struct ip_vs_conn *cp,
 				       struct sk_buff *skb,
 				       struct tcphdr **tcph)
 {
