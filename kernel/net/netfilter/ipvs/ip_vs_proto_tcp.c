@@ -691,16 +691,14 @@ static void tcp_in_adjust_seq(struct ip_vs_conn *cp, struct tcphdr *tcph)
 }
 
 /*
- * add client address in tcp option
- * alloc a new skb, and free the old skb
- * return new skb
+ * add client (ip and port) in tcp option
+ * return 0 if success 
  */
-static struct sk_buff *tcp_opt_add_toa(struct ip_vs_conn *cp,
-				       struct sk_buff *old_skb,
+static int  tcp_opt_add_toa(struct ip_vs_conn *cp,
+				       struct sk_buff *skb,
 				       struct tcphdr **tcph)
 {
 	__u32 mtu;
-	struct sk_buff *new_skb = NULL;
 	struct ip_vs_tcpo_addr *toa;
 	unsigned int tcphoff;
 	struct tcphdr *th;
@@ -709,45 +707,44 @@ static struct sk_buff *tcp_opt_add_toa(struct ip_vs_conn *cp,
 	/* now only process IPV4 */
 	if (cp->af != AF_INET) {
 		IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_FAIL_PROTO);
-		return old_skb;
+		return 1;
 	}
 
 	/* skb length and tcp option length checking */
-	mtu = dst_mtu((struct dst_entry *)old_skb->_skb_dst);
-	if (old_skb->len > (mtu - sizeof(struct ip_vs_tcpo_addr))) {
+        if (skb->_skb_dst)
+                mtu = dst_mtu((struct dst_entry *)skb->_skb_dst);
+        else             /* fast_xmit can reach here */
+                mtu = cp->dev_inside ? cp->dev_inside->mtu :
+                                sizeof(struct ip_vs_tcpo_addr);
+	if (skb->len > (mtu - sizeof(struct ip_vs_tcpo_addr))) {
 		IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_FAIL_LEN);
-		return old_skb;
+		return 1;
 	}
 
 	/* the maximum length of TCP head is 60 bytes, so only 40 bytes for options */
 	if ((60 - ((*tcph)->doff << 2)) < sizeof(struct ip_vs_tcpo_addr)) {
 		IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_HEAD_FULL);
-		return old_skb;
+		return 1;
 	}
 
-	/* copy all skb, plus ttm space , new skb is linear */
-	new_skb = skb_copy_expand(old_skb,
-				  skb_headroom(old_skb),
-				  skb_tailroom(old_skb) +
-				  sizeof(struct ip_vs_tcpo_addr), GFP_ATOMIC);
-	if (new_skb == NULL) {
-		IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_FAIL_MEM);
-		return old_skb;
-	}
-
-	/* free old skb */
-	kfree_skb(old_skb);
+        /* expand skb if needed */
+        if ((sizeof(struct ip_vs_tcpo_addr) > skb_tailroom(skb)) &&
+                        pskb_expand_head(skb, 0,
+                        sizeof(struct ip_vs_tcpo_addr), GFP_ATOMIC)){
+                IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_FAIL_MEM);
+                return 1;
+        }
 
 	/*
 	 * add client ip
 	 */
-	tcphoff = ip_hdrlen(new_skb);
+	tcphoff = ip_hdrlen(skb);
 	/* get new tcp header */
 	*tcph = th =
-	    (struct tcphdr *)((void *)skb_network_header(new_skb) + tcphoff);
+	    (struct tcphdr *)((void *)skb_network_header(skb) + tcphoff);
 
 	/* ptr to old opts */
-	p = skb_tail_pointer(new_skb) - 1;
+	p = skb_tail_pointer(skb) - 1;
 	q = p + sizeof(struct ip_vs_tcpo_addr);
 
 	/* move data down, offset is sizeof(struct ip_vs_tcpo_addr) */
@@ -758,7 +755,7 @@ static struct sk_buff *tcp_opt_add_toa(struct ip_vs_conn *cp,
 	}
 
 	/* move tail to new postion */
-	new_skb->tail += sizeof(struct ip_vs_tcpo_addr);
+	skb->tail += sizeof(struct ip_vs_tcpo_addr);
 
 	/* put client ip opt , ptr point to opts */
 	toa = (struct ip_vs_tcpo_addr *)(th + 1);
@@ -770,41 +767,40 @@ static struct sk_buff *tcp_opt_add_toa(struct ip_vs_conn *cp,
 	/* reset tcp header length */
 	th->doff += sizeof(struct ip_vs_tcpo_addr) / 4;
 	/* reset ip header totoal length */
-	ip_hdr(new_skb)->tot_len =
-	    htons(ntohs(ip_hdr(new_skb)->tot_len) +
+	ip_hdr(skb)->tot_len =
+	    htons(ntohs(ip_hdr(skb)->tot_len) +
 		  sizeof(struct ip_vs_tcpo_addr));
 	/* reset skb length */
-	new_skb->len += sizeof(struct ip_vs_tcpo_addr);
+	skb->len += sizeof(struct ip_vs_tcpo_addr);
 
 	/* re-calculate tcp csum */
 	th->check = 0;
-	new_skb->csum = skb_checksum(new_skb, tcphoff,
-					new_skb->len - tcphoff, 0);
+	skb->csum = skb_checksum(skb, tcphoff,
+					skb->len - tcphoff, 0);
 	th->check = csum_tcpudp_magic(cp->caddr.ip,
 					cp->vaddr.ip,
-					new_skb->len - tcphoff,
-					cp->protocol, new_skb->csum);
+					skb->len - tcphoff,
+					cp->protocol, skb->csum);
 
 	/* re-calculate ip head csum, tot_len has been adjusted */
-	ip_send_check(ip_hdr(new_skb));
+	ip_send_check(ip_hdr(skb));
 
-	if(new_skb->ip_summed == CHECKSUM_PARTIAL) {
-		new_skb->ip_summed = CHECKSUM_COMPLETE;
-		skb_shinfo(new_skb)->gso_size = 0;
+	if(skb->ip_summed == CHECKSUM_PARTIAL) {
+		skb->ip_summed = CHECKSUM_COMPLETE;
+		skb_shinfo(skb)->gso_size = 0;
 	}
 
 	IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_OK);
 
-	return new_skb;
+	return 0;
 }
 
 #ifdef CONFIG_IP_VS_IPV6
-static struct sk_buff *tcp_opt_add_toa_v6(struct ip_vs_conn *cp,
-				       struct sk_buff *old_skb,
+static int sk_buff tcp_opt_add_toa_v6(struct ip_vs_conn *cp,
+				       struct sk_buff *skb,
 				       struct tcphdr **tcph)
 {
 	__u32 mtu;
-	struct sk_buff *new_skb = NULL;
 	struct ip_vs_tcpo_addr_v6 *toa;
 	unsigned int tcphoff;
 	struct tcphdr *th;
@@ -813,34 +809,34 @@ static struct sk_buff *tcp_opt_add_toa_v6(struct ip_vs_conn *cp,
 	/* IPV6 */
 	if (cp->af != AF_INET6) {
 		IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_FAIL_PROTO);
-		return old_skb;
+		return 1;
 	}
 
 	/* skb length and tcph length checking */
-	mtu = dst_mtu((struct dst_entry *)old_skb->_skb_dst);
-	if (old_skb->len > (mtu - sizeof(struct ip_vs_tcpo_addr_v6))) {
+        if (skb->_skb_dst)
+                mtu = dst_mtu((struct dst_entry *)skb->_skb_dst);
+        else            /* fast_xmit can reach here */
+                mtu = cp->dev_inside ? cp->dev_inside->mtu :
+                                sizeof(struct ip_vs_tcpo_addr_v6);
+
+	if (skb->len > (mtu - sizeof(struct ip_vs_tcpo_addr_v6))) {
 		IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_FAIL_LEN);
-		return old_skb;
+		return 1;
 	}
 
 	/* the maximum length of TCP head is 60 bytes, so only 40 bytes for options */
 	if ((60 - ((*tcph)->doff << 2)) < sizeof(struct ip_vs_tcpo_addr_v6)) {
 		IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_HEAD_FULL);
-		return old_skb;
+		return 1;
 	}
 
-	/* copy all skb, plus ttm space , new skb is linear */
-	new_skb = skb_copy_expand(old_skb,
-				  skb_headroom(old_skb),
-				  skb_tailroom(old_skb) +
-				  sizeof(struct ip_vs_tcpo_addr_v6), GFP_ATOMIC);
-	if (new_skb == NULL) {
-		IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_FAIL_MEM);
-		return old_skb;
-	}
-
-	/* free old skb */
-	kfree_skb(old_skb);
+        /* expand skb if needed */
+        if ((sizeof(struct ip_vs_tcpo_addr_v6) > skb_tailroom(skb)) &&
+                        pskb_expand_head(skb, 0,
+                        sizeof(struct ip_vs_tcpo_addr_v6), GFP_ATOMIC)){
+                IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_FAIL_MEM);
+                return 1;
+        }
 
 	/*
 	 * add client ip
@@ -848,10 +844,10 @@ static struct sk_buff *tcp_opt_add_toa_v6(struct ip_vs_conn *cp,
 	tcphoff = sizeof(struct ipv6hdr);
 	/* get new tcp header */
 	*tcph = th =
-	    (struct tcphdr *)((void *)skb_network_header(new_skb) + tcphoff);
+	    (struct tcphdr *)((void *)skb_network_header(skb) + tcphoff);
 
 	/* ptr to old opts */
-	p = skb_tail_pointer(new_skb) - 1;
+	p = skb_tail_pointer(skb) - 1;
 	q = p + sizeof(struct ip_vs_tcpo_addr_v6);
 
 	/* move data down, offset is sizeof(struct ip_vs_tcpo_addr) */
@@ -862,7 +858,7 @@ static struct sk_buff *tcp_opt_add_toa_v6(struct ip_vs_conn *cp,
 	}
 
 	/* move tail to new postion */
-	new_skb->tail += sizeof(struct ip_vs_tcpo_addr_v6);
+	skb->tail += sizeof(struct ip_vs_tcpo_addr_v6);
 
 	/* put client ip opt , ptr point to opts */
 	toa = (struct ip_vs_tcpo_addr_v6 *)(th + 1);
@@ -874,29 +870,29 @@ static struct sk_buff *tcp_opt_add_toa_v6(struct ip_vs_conn *cp,
 	/* reset tcp header length */
 	th->doff += sizeof(struct ip_vs_tcpo_addr_v6) >> 2;
 	/* reset ip header totoal length */
-	ipv6_hdr(new_skb)->payload_len =
-	    htons(ntohs(ipv6_hdr(new_skb)->payload_len) +
+	ipv6_hdr(skb)->payload_len =
+	    htons(ntohs(ipv6_hdr(skb)->payload_len) +
 		  sizeof(struct ip_vs_tcpo_addr_v6));
 	/* reset skb length */
-	new_skb->len += sizeof(struct ip_vs_tcpo_addr_v6);
+	skb->len += sizeof(struct ip_vs_tcpo_addr_v6);
 
 	/* re-calculate tcp csum */
 	th->check = 0;
-	new_skb->csum = skb_checksum(new_skb, tcphoff,
-					new_skb->len - tcphoff, 0);
+	skb->csum = skb_checksum(skb, tcphoff,
+					skb->len - tcphoff, 0);
 	th->check = csum_ipv6_magic(&cp->caddr.in6,
 					&cp->vaddr.in6,
-					new_skb->len - tcphoff,
-					cp->protocol, new_skb->csum);
+					skb->len - tcphoff,
+					cp->protocol, skb->csum);
 
-	if(new_skb->ip_summed == CHECKSUM_PARTIAL) {
-		new_skb->ip_summed = CHECKSUM_COMPLETE;
-		skb_shinfo(new_skb)->gso_size = 0;
+	if(skb->ip_summed == CHECKSUM_PARTIAL) {
+		skb->ip_summed = CHECKSUM_COMPLETE;
+		skb_shinfo(skb)->gso_size = 0;
 	}
 
 	IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_OK);
 
-	return new_skb;
+	return 0;
 }
 #endif
 
@@ -976,13 +972,12 @@ tcp_dnat_handler(struct sk_buff *skb,
 }
 
 static int
-tcp_fnat_in_handler(struct sk_buff **skb_p,
+tcp_fnat_in_handler(struct sk_buff *skb,
 		    struct ip_vs_protocol *pp, struct ip_vs_conn *cp)
 {
 	struct tcphdr *tcph;
 	unsigned int tcphoff;
 	int oldlen;
-	struct sk_buff *skb = *skb_p;
 
 #ifdef CONFIG_IP_VS_IPV6
 	if (cp->af == AF_INET6)
@@ -1022,10 +1017,10 @@ tcp_fnat_in_handler(struct sk_buff **skb_p,
 		tcp_in_init_seq(cp, skb, tcph);
 #ifdef CONFIG_IP_VS_IPV6
 		if (cp->af == AF_INET6)
-			skb = *skb_p = tcp_opt_add_toa_v6(cp, skb, &tcph);
+			tcp_opt_add_toa_v6(cp, skb, &tcph);
 		else
 #endif
-			skb = *skb_p = tcp_opt_add_toa(cp, skb, &tcph);
+			tcp_opt_add_toa(cp, skb, &tcph);
 	}
 
 	/* TOA: add client ip */
@@ -1034,10 +1029,10 @@ tcp_fnat_in_handler(struct sk_buff **skb_p,
 	    && !tcph->syn && !tcph->rst && !tcph->fin) {
 #ifdef CONFIG_IP_VS_IPV6
 		if (cp->af == AF_INET6)
-			skb = *skb_p = tcp_opt_add_toa_v6(cp, skb, &tcph);
+			tcp_opt_add_toa_v6(cp, skb, &tcph);
 		else
 #endif
-			skb = *skb_p = tcp_opt_add_toa(cp, skb, &tcph);
+			tcp_opt_add_toa(cp, skb, &tcph);
 	}
 
 	/*

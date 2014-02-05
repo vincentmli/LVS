@@ -287,7 +287,7 @@ struct ip_vs_protocol {
 			     struct ip_vs_protocol * pp,
 			     struct ip_vs_conn * cp);
 
-	int (*fnat_in_handler) (struct sk_buff ** skb_p,
+	int (*fnat_in_handler) (struct sk_buff * skb,
 				struct ip_vs_protocol * pp,
 				struct ip_vs_conn * cp);
 
@@ -424,8 +424,12 @@ struct ip_vs_conn {
 
 	/* L2 direct response xmit */
 	struct net_device	*indev;
-	unsigned char		src_hwaddr[MAX_ADDR_LEN];
-	unsigned char		dst_hwaddr[MAX_ADDR_LEN];
+	unsigned char           src_hwaddr[ETH_ALEN];
+	unsigned char           dst_hwaddr[ETH_ALEN];
+	struct net_device       *dev_inside;
+	unsigned char           src_hwaddr_inside[ETH_ALEN];
+	unsigned char           dst_hwaddr_inside[ETH_ALEN];
+
 };
 
 /*
@@ -710,6 +714,9 @@ enum {
 	FAST_XMIT_NO_MAC,
 	FAST_XMIT_SYNPROXY_SAVE,
 	FAST_XMIT_DEV_LOST,
+	FAST_XMIT_REJECT_INSIDE,
+	FAST_XMIT_PASS_INSIDE,
+	FAST_XMIT_SYNPROXY_SAVE_INSIDE,
 	RST_IN_SYN_SENT,
 	RST_OUT_SYN_SENT,
 	RST_IN_ESTABLISHED,
@@ -954,6 +961,7 @@ extern int sysctl_ip_vs_tcp_drop_entry;
 extern int sysctl_ip_vs_udp_drop_entry;
 extern int sysctl_ip_vs_conn_expire_tcp_rst;
 extern int sysctl_ip_vs_fast_xmit;
+extern int sysctl_ip_vs_fast_xmit_inside;
 
 extern struct ip_vs_service *ip_vs_service_get(int af, __u32 fwmark,
 					       __u16 protocol,

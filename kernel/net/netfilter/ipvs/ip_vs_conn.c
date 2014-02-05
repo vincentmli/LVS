@@ -962,6 +962,10 @@ static void ip_vs_conn_expire(unsigned long data)
 		if (cp->indev != NULL)
 			dev_put(cp->indev);
 
+		if (cp->dev_inside != NULL)
+			dev_put(cp->dev_inside);
+
+
 		kmem_cache_free(ip_vs_conn_cachep, cp);
 		return;
 	}

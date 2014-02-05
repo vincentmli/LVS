@@ -150,6 +150,9 @@ int sysctl_ip_vs_udp_drop_entry = 1;
 int sysctl_ip_vs_conn_expire_tcp_rst = 1;
 /* L2 fast xmit, response only (to client) */
 int sysctl_ip_vs_fast_xmit = 1;
+/* L2 fast xmit, inside (to RS) */
+int sysctl_ip_vs_fast_xmit_inside = 1;
+
 
 #ifdef CONFIG_IP_VS_DEBUG
 static int sysctl_ip_vs_debug_level = 0;
@@ -2199,6 +2202,16 @@ static struct ctl_table vs_vars[] = {
 	 .extra1 = &ip_vs_entry_min,	/* zero */
 	 .extra2 = &ip_vs_entry_max,	/* one */
 	 },
+	{
+	.procname = "fast_response_xmit_inside",
+	.data = &sysctl_ip_vs_fast_xmit_inside,
+	.maxlen = sizeof(int),
+	.mode = 0644,
+	.proc_handler = &proc_dointvec_minmax,
+	.strategy = &sysctl_intvec,
+	.extra1 = &ip_vs_entry_min,    /* zero */
+	.extra2 = &ip_vs_entry_max,    /* one */
+	},
 	{.ctl_name = 0}
 };
 
@@ -2527,6 +2540,10 @@ static struct ip_vs_estats_entry ext_stats[] = {
 	IP_VS_ESTATS_ITEM("fast_xmit_no_mac", FAST_XMIT_NO_MAC),
 	IP_VS_ESTATS_ITEM("fast_xmit_synproxy_save", FAST_XMIT_SYNPROXY_SAVE),
 	IP_VS_ESTATS_ITEM("fast_xmit_dev_lost", FAST_XMIT_DEV_LOST),
+	IP_VS_ESTATS_ITEM("fast_xmit_reject_inside", FAST_XMIT_REJECT_INSIDE),
+	IP_VS_ESTATS_ITEM("fast_xmit_pass_inside", FAST_XMIT_PASS_INSIDE),
+	IP_VS_ESTATS_ITEM("fast_xmit_synproxy_save_inside",
+			FAST_XMIT_SYNPROXY_SAVE_INSIDE),
 	IP_VS_ESTATS_ITEM("rst_in_syn_sent", RST_IN_SYN_SENT),
 	IP_VS_ESTATS_ITEM("rst_out_syn_sent", RST_OUT_SYN_SENT),
 	IP_VS_ESTATS_ITEM("rst_in_established", RST_IN_ESTABLISHED),
