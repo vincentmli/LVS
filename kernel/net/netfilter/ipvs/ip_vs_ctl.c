@@ -152,6 +152,9 @@ int sysctl_ip_vs_conn_expire_tcp_rst = 1;
 int sysctl_ip_vs_fast_xmit = 1;
 /* L2 fast xmit, inside (to RS) */
 int sysctl_ip_vs_fast_xmit_inside = 1;
+/* skb csum offload */
+int sysctl_ip_vs_csum_offload = 1;
+
 
 
 #ifdef CONFIG_IP_VS_DEBUG
@@ -2212,6 +2215,16 @@ static struct ctl_table vs_vars[] = {
 	.extra1 = &ip_vs_entry_min,    /* zero */
 	.extra2 = &ip_vs_entry_max,    /* one */
 	},
+        {
+         .procname = "csum_offload",
+         .data = &sysctl_ip_vs_csum_offload,
+         .maxlen = sizeof(int),
+         .mode = 0644,
+         .proc_handler = &proc_dointvec_minmax,
+         .strategy = &sysctl_intvec,
+         .extra1 = &ip_vs_entry_min,    /* zero */
+         .extra2 = &ip_vs_entry_max,    /* one */
+         },
 	{.ctl_name = 0}
 };
 

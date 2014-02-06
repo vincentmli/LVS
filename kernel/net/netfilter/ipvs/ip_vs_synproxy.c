@@ -23,8 +23,10 @@
 static inline void
 syn_proxy_seq_csum_update(struct tcphdr *tcph, __u32 old_seq, __u32 new_seq)
 {
-	tcph->check = csum_fold(ip_vs_check_diff4(old_seq, new_seq,
-						  ~csum_unfold(tcph->check)));
+        /* do checksum later */
+        if (!sysctl_ip_vs_csum_offload)
+                tcph->check = csum_fold(ip_vs_check_diff4(old_seq, new_seq,
+                                                  ~csum_unfold(tcph->check)));
 }
 
 /*

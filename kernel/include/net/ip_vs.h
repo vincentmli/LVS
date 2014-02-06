@@ -962,6 +962,7 @@ extern int sysctl_ip_vs_udp_drop_entry;
 extern int sysctl_ip_vs_conn_expire_tcp_rst;
 extern int sysctl_ip_vs_fast_xmit;
 extern int sysctl_ip_vs_fast_xmit_inside;
+extern int sysctl_ip_vs_csum_offload;
 
 extern struct ip_vs_service *ip_vs_service_get(int af, __u32 fwmark,
 					       __u16 protocol,

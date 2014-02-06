@@ -201,6 +201,24 @@ tcp_partial_csum_reset(int af, int len, struct tcphdr *tcph,
 		tcph->check = ~tcp_v4_check(len, saddr->ip, daddr->ip, 0);
 }
 
+static inline void
+tcp_seq_csum_update(struct tcphdr *tcph, __u32 oldseq, __u32 newseq)
+{
+        /* do checksum later */
+        if (!sysctl_ip_vs_csum_offload)
+                tcph->check = csum_fold(ip_vs_check_diff4(oldseq, newseq,
+                                                ~csum_unfold(tcph->check)));
+}
+
+static inline void
+tcp_mss_csum_update(struct tcphdr *tcph, __be16 oldmss, __be16 newmss)
+{
+        /* do checksum later */
+        if (!sysctl_ip_vs_csum_offload)
+                tcph->check = csum_fold(ip_vs_check_diff2(oldmss, newmss,
+                                                ~csum_unfold(tcph->check)));
+}
+
 /* adjust tcp opt mss, sub TCPOLEN_CIP */
 static void tcp_opt_adjust_mss(int af, struct tcphdr *tcph)
 {
@@ -238,10 +256,9 @@ static void tcp_opt_adjust_mss(int af, struct tcphdr *tcph)
 				else
 #endif
 					in_mss -= TCPOLEN_ADDR;
-				*((__be16 *) ptr) = htons(in_mss);/* set mss, 16bit */
-				tcph->check = csum_fold(ip_vs_check_diff2(old,
-								*(__be16 *) ptr,
-						~csum_unfold(tcph->check)));
+                                /* set mss, 16bit */
+                                *((__be16 *) ptr) = htons(in_mss);
+                                tcp_mss_csum_update(tcph, old, *(__be16 *)ptr);
 				return;
 			}
 
@@ -306,8 +323,7 @@ static int tcp_out_adjust_seq(struct ip_vs_conn *cp, struct tcphdr *tcph)
 	/* adjust ack sequence */
 	tcph->ack_seq = htonl(ntohl(tcph->ack_seq) - cp->fnat_seq.delta);
 	/* update checksum */
-	tcph->check = csum_fold(ip_vs_check_diff4(old_seq, tcph->ack_seq,
-						~csum_unfold(tcph->check)));
+        tcp_seq_csum_update(tcph, old_seq, tcph->ack_seq);
 
 	/* adjust sack sequence */
 	ptr = (__u8 *) (tcph + 1);
@@ -347,20 +363,14 @@ static int tcp_out_adjust_seq(struct ip_vs_conn *cp, struct tcphdr *tcph)
 					old_seq = *tmp;
 					*tmp = htonl(ntohl(*tmp) -
 							cp->fnat_seq.delta);
-					tcph->check =
-						csum_fold(ip_vs_check_diff4(
-								old_seq, *tmp,
-						~csum_unfold(tcph->check)));
+                                        tcp_seq_csum_update(tcph, old_seq, *tmp);
 
 					tmp++;
 
 					old_seq = *tmp;
 					*tmp = htonl(ntohl(*tmp) -
 							cp->fnat_seq.delta);
-					tcph->check =
-						csum_fold(ip_vs_check_diff4(
-								old_seq, *tmp,
-						~csum_unfold(tcph->check)));
+                                        tcp_seq_csum_update(tcph, old_seq, *tmp);
 				}
 				return 1;
 			}
@@ -414,6 +424,13 @@ tcp_snat_handler(struct sk_buff *skb,
 	if (ip_vs_synproxy_snat_handler(tcph, cp) == 0) {
 		return 0;
 	}
+
+        if (sysctl_ip_vs_csum_offload) {
+                skb->csum_start = skb_network_header(skb) -
+                                skb->head + (ip_hdr(skb)->ihl << 2);
+                skb->csum_offset = offsetof(struct tcphdr, check);
+                skb->ip_summed = CHECKSUM_PARTIAL;
+        }
 
 	/* Adjust TCP checksums */
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
@@ -516,6 +533,14 @@ tcp_fnat_out_handler(struct sk_buff *skb,
 		tcp_out_init_seq(cp, tcph);
 	}
 
+        /* do csum later */
+        if (sysctl_ip_vs_csum_offload) {
+                skb->csum_start = skb_network_header(skb) -
+                                skb->head + (ip_hdr(skb)->ihl << 2);
+                skb->csum_offset = offsetof(struct tcphdr, check);
+                skb->ip_summed = CHECKSUM_PARTIAL;
+        }
+
 	/* Adjust TCP checksums */
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
 		tcp_partial_csum_reset(cp->af, (skb->len - tcphoff),
@@ -591,15 +616,18 @@ static void tcp_opt_remove_timestamp(struct tcphdr *tcph)
 				 * but data is 10Byte. zero the buf
 				 */
 				memset((__u8*)old, 0, sizeof(old));
-				memset((__u8*)new, 0, sizeof(new));
 				memcpy((__u8*)old, ptr - 2, TCPOLEN_TIMESTAMP);
 				for (i = 0; i < TCPOLEN_TIMESTAMP; i++) {
 					*(ptr - 2 + i) = TCPOPT_NOP;	/* TCPOPT_NOP replace timestamp opt */
 				}
-				memcpy((__u8*)new, ptr - 2, TCPOLEN_TIMESTAMP);
-				tcph->check = csum_fold(ip_vs_check_diff16(
-								old, new,
-						~csum_unfold(tcph->check)));
+
+                                if (!sysctl_ip_vs_csum_offload) {
+                                        memset((__u8*)new, 0, sizeof(new));
+                                        memcpy((__u8*)new, ptr - 2, TCPOLEN_TIMESTAMP);
+                                        tcph->check = csum_fold(
+                                                ip_vs_check_diff16(old, new,
+                                                ~csum_unfold(tcph->check)));
+                                }
 				return;
 			}
 
@@ -683,8 +711,7 @@ static void tcp_in_adjust_seq(struct ip_vs_conn *cp, struct tcphdr *tcph)
 	/* adjust seq for FULLNAT */
 	tcph->seq = htonl(ntohl(tcph->seq) + cp->fnat_seq.delta);
 	/* update checksum */
-	tcph->check = csum_fold(ip_vs_check_diff4(old_seq, tcph->seq,
-					~csum_unfold(tcph->check)));
+        tcp_seq_csum_update(tcph, old_seq, tcph->seq);
 
 	/* adjust ack_seq for SYNPROXY, include tcp hdr and sack opt */
 	ip_vs_synproxy_dnat_handler(tcph, &cp->syn_proxy_seq);
@@ -774,21 +801,23 @@ static int  tcp_opt_add_toa(struct ip_vs_conn *cp,
 	skb->len += sizeof(struct ip_vs_tcpo_addr);
 
 	/* re-calculate tcp csum */
-	th->check = 0;
-	skb->csum = skb_checksum(skb, tcphoff,
-					skb->len - tcphoff, 0);
-	th->check = csum_tcpudp_magic(cp->caddr.ip,
-					cp->vaddr.ip,
-					skb->len - tcphoff,
-					cp->protocol, skb->csum);
+        if (!sysctl_ip_vs_csum_offload) {
+                th->check = 0;
+                skb->csum = skb_checksum(skb, tcphoff,
+                                        skb->len - tcphoff, 0);
+                th->check = csum_tcpudp_magic(cp->caddr.ip,
+                                        cp->vaddr.ip,
+                                        skb->len - tcphoff,
+                                        cp->protocol, skb->csum);
+
+                if (skb->ip_summed == CHECKSUM_PARTIAL) {
+                        skb->ip_summed = CHECKSUM_COMPLETE;
+                        skb_shinfo(skb)->gso_size = 0;
+                }
+        }
 
 	/* re-calculate ip head csum, tot_len has been adjusted */
 	ip_send_check(ip_hdr(skb));
-
-	if(skb->ip_summed == CHECKSUM_PARTIAL) {
-		skb->ip_summed = CHECKSUM_COMPLETE;
-		skb_shinfo(skb)->gso_size = 0;
-	}
 
 	IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_OK);
 
@@ -877,18 +906,20 @@ static int tcp_opt_add_toa_v6(struct ip_vs_conn *cp,
 	skb->len += sizeof(struct ip_vs_tcpo_addr_v6);
 
 	/* re-calculate tcp csum */
-	th->check = 0;
-	skb->csum = skb_checksum(skb, tcphoff,
-					skb->len - tcphoff, 0);
-	th->check = csum_ipv6_magic(&cp->caddr.in6,
-					&cp->vaddr.in6,
-					skb->len - tcphoff,
-					cp->protocol, skb->csum);
+        if (!sysctl_ip_vs_csum_offload) {
+                th->check = 0;
+                skb->csum = skb_checksum(skb, tcphoff,
+                                        skb->len - tcphoff, 0);
+                th->check = csum_ipv6_magic(&cp->caddr.in6,
+                                        &cp->vaddr.in6,
+                                        skb->len - tcphoff,
+                                        cp->protocol, skb->csum);
 
-	if(skb->ip_summed == CHECKSUM_PARTIAL) {
-		skb->ip_summed = CHECKSUM_COMPLETE;
-		skb_shinfo(skb)->gso_size = 0;
-	}
+                if(skb->ip_summed == CHECKSUM_PARTIAL) {
+                        skb->ip_summed = CHECKSUM_COMPLETE;
+                        skb_shinfo(skb)->gso_size = 0;
+                }
+        }
 
 	IP_VS_INC_ESTATS(ip_vs_esmib, FULLNAT_ADD_TOA_OK);
 
@@ -936,6 +967,13 @@ tcp_dnat_handler(struct sk_buff *skb,
 	 * Syn-proxy ack_seq change, include tcp hdr and sack opt.
 	 */
 	ip_vs_synproxy_dnat_handler(tcph, &cp->syn_proxy_seq);
+
+        if (sysctl_ip_vs_csum_offload) {
+                skb->csum_start = skb_network_header(skb) -
+                                skb->head + (ip_hdr(skb)->ihl << 2);
+                skb->csum_offset = offsetof(struct tcphdr, check);
+                skb->ip_summed = CHECKSUM_PARTIAL;
+        }
 
 	/*
 	 *      Adjust TCP checksums
@@ -1045,6 +1083,13 @@ tcp_fnat_in_handler(struct sk_buff *skb,
 	/* adjust src/dst port */
 	tcph->source = cp->lport;
 	tcph->dest = cp->dport;
+
+        if (sysctl_ip_vs_csum_offload) {
+                skb->csum_start = skb_network_header(skb) -
+                                skb->head + (ip_hdr(skb)->ihl << 2);
+                skb->csum_offset = offsetof(struct tcphdr, check);
+                skb->ip_summed = CHECKSUM_PARTIAL;
+        }
 
 	/* Adjust TCP checksums */
 	if (skb->ip_summed == CHECKSUM_PARTIAL) {
