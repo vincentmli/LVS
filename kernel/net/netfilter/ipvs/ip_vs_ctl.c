@@ -310,22 +310,6 @@ static void update_defense_level(void)
 	local_bh_enable();
 }
 
-/*
- *	Timer for checking the defense
- */
-#define DEFENSE_TIMER_PERIOD	1*HZ
-static void defense_work_handler(struct work_struct *work);
-static DECLARE_DELAYED_WORK(defense_work, defense_work_handler);
-
-static void defense_work_handler(struct work_struct *work)
-{
-	update_defense_level();
-	if (atomic_read(&ip_vs_dropentry))
-		ip_vs_random_dropentry();
-
-	schedule_delayed_work(&defense_work, DEFENSE_TIMER_PERIOD);
-}
-
 int ip_vs_use_count_inc(void)
 {
 	return try_module_get(THIS_MODULE);
@@ -4291,10 +4275,6 @@ int __init ip_vs_control_init(void)
 		INIT_LIST_HEAD(&ip_vs_rtable[idx]);
 	}
 
-
-	/* Hook the defense timer */
-	schedule_delayed_work(&defense_work, DEFENSE_TIMER_PERIOD);
-
 	LeaveFunction(2);
 	return 0;
 
@@ -4312,8 +4292,6 @@ void ip_vs_control_cleanup(void)
 {
 	EnterFunction(2);
 	ip_vs_trash_cleanup();
-	cancel_rearming_delayed_work(&defense_work);
-	cancel_work_sync(&defense_work.work);
 	ip_vs_del_stats(ip_vs_stats);
 	unregister_sysctl_table(sysctl_header);
 	proc_net_remove(&init_net, "ip_vs_stats");

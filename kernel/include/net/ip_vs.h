@@ -381,6 +381,8 @@ struct ip_vs_conn {
 					 * state transition triggerd
 					 * synchronization
 					 */
+        u16 cpuid;
+
 	/* Control members */
 	struct ip_vs_conn *control;	/* Master control connection */
 	atomic_t n_control;	/* Number of controlled ones */
@@ -725,6 +727,7 @@ enum {
 	LRO_REJECT,
 	XMIT_UNEXPECTED_MTU,
 	CONN_SCHED_UNREACH,
+	CONN_EXCEEDED,
 	IP_VS_EXT_STAT_LAST
 };
 
@@ -774,7 +777,7 @@ extern void ip_vs_init_hash_table(struct list_head *table, int rows);
 #define CONFIG_IP_VS_TAB_BITS   22
 #endif
 
-#define IP_VS_CONN_TAB_BITS	CONFIG_IP_VS_TAB_BITS
+#define IP_VS_CONN_TAB_BITS	20	
 #define IP_VS_CONN_TAB_SIZE     (1 << IP_VS_CONN_TAB_BITS)
 #define IP_VS_CONN_TAB_MASK     (IP_VS_CONN_TAB_SIZE - 1)
 
@@ -963,6 +966,7 @@ extern int sysctl_ip_vs_conn_expire_tcp_rst;
 extern int sysctl_ip_vs_fast_xmit;
 extern int sysctl_ip_vs_fast_xmit_inside;
 extern int sysctl_ip_vs_csum_offload;
+extern int sysctl_ip_vs_conn_max_num;
 
 extern struct ip_vs_service *ip_vs_service_get(int af, __u32 fwmark,
 					       __u16 protocol,
