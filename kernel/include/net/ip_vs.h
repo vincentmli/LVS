@@ -483,7 +483,6 @@ struct ip_vs_service {
 	struct list_head s_list;	/* for normal service table */
 	struct list_head f_list;	/* for fwmark-based service table */
 	atomic_t refcnt;	/* reference counter */
-	atomic_t usecnt;	/* use counter */
 
 	u16 af;			/* address family */
 	__u16 protocol;		/* which protocol (TCP/UDP) */
@@ -497,6 +496,7 @@ struct ip_vs_service {
 	/* for realservers list */
 	struct list_head destinations;	/* real server d-linked list */
 	__u32 num_dests;	/* number of servers */
+	long weight;		/* sum of servers weight */
 
 	/* for local ip address list, now only used in FULL NAT model */
 	struct list_head laddr_list;	/* local ip address list */
@@ -504,13 +504,15 @@ struct ip_vs_service {
 	__u32 num_laddrs;	/* number of local ip address */
 	struct list_head *curr_laddr;	/* laddr data list head */
 
-	struct ip_vs_stats *stats;	/* Use per-cpu statistics for the service */
+	struct ip_vs_stats stats;	/* statistics for the service */
 	struct ip_vs_app *inc;	/* bind conns to this app inc */
 
 	/* for scheduling */
 	struct ip_vs_scheduler *scheduler;	/* bound scheduler object */
 	rwlock_t sched_lock;	/* lock sched_data */
 	void *sched_data;	/* scheduler application data */
+
+	struct ip_vs_service *svc0;	/* the svc of cpu0 */
 };
 
 /*
@@ -529,7 +531,7 @@ struct ip_vs_dest {
 	atomic_t weight;	/* server weight */
 
 	atomic_t refcnt;	/* reference counter */
-	struct ip_vs_stats *stats;	/* Use per-cpu statistics for destination server */
+	struct ip_vs_stats stats;	/* statistics for destination server */
 
 	/* connection counters and thresholds */
 	atomic_t activeconns;	/* active connections */
@@ -557,6 +559,7 @@ struct ip_vs_dest {
 struct ip_vs_laddr {
 	struct list_head n_list;	/* for the local address in the service */
 	u16 af;			/* address family */
+	u16 cpuid;		/* record the cpu laddr has been assigned */
 	union nf_inet_addr addr;	/* ip address */
 	atomic64_t port;	/* port counts */
 	atomic_t refcnt;	/* reference count */
@@ -966,7 +969,10 @@ extern int sysctl_ip_vs_conn_expire_tcp_rst;
 extern int sysctl_ip_vs_fast_xmit;
 extern int sysctl_ip_vs_fast_xmit_inside;
 extern int sysctl_ip_vs_csum_offload;
+extern int sysctl_ip_vs_reserve_core;
 extern int sysctl_ip_vs_conn_max_num;
+
+DECLARE_PER_CPU(spinlock_t, ip_vs_svc_lock);
 
 extern struct ip_vs_service *ip_vs_service_get(int af, __u32 fwmark,
 					       __u16 protocol,
@@ -977,7 +983,8 @@ extern struct ip_vs_service *ip_vs_lookup_vip(int af, __u16 protocol,
 
 static inline void ip_vs_service_put(struct ip_vs_service *svc)
 {
-	atomic_dec(&svc->usecnt);
+	if (likely(svc != NULL))
+		spin_unlock(&__get_cpu_var(ip_vs_svc_lock));
 }
 
 extern struct ip_vs_dest *ip_vs_lookup_real_service(int af, __u16 protocol,
