@@ -567,7 +567,7 @@ ipvs_set_rule(int cmd, virtual_server * vs, real_server * rs)
 			srule->netmask = vs->granularity_persistence;
 
 	if(vs->syn_proxy)
-		srule->flags |= IP_VS_CONN_F_SYNPROXY;
+		srule->flags |= IP_VS_SVC_F_SYNPROXY;
 
 	/* SVR specific */
 	if (rs) {

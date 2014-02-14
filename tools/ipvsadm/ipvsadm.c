@@ -684,9 +684,9 @@ parse_options(int argc, char **argv, struct ipvs_command_entry *ce,
 			set_option(options, OPT_SYNPROXY);
 
 			if(!memcmp(optarg , "enable" , strlen("enable")))
-				ce->svc.flags = ce->svc.flags | IP_VS_CONN_F_SYNPROXY;
+				ce->svc.flags = ce->svc.flags | IP_VS_SVC_F_SYNPROXY;
 			else if(!memcmp(optarg , "disable" , strlen("disable")))
-				ce->svc.flags = ce->svc.flags & (~IP_VS_CONN_F_SYNPROXY);
+				ce->svc.flags = ce->svc.flags & (~IP_VS_SVC_F_SYNPROXY);
 			else
 				fail(2 , "synproxy switch must be enable or disable\n");
 
@@ -1550,6 +1550,10 @@ print_service_entry(ipvs_service_entry_t *se, unsigned int format)
 			printf(" pe %s", se->pe_name);
 		if (se->flags & IP_VS_SVC_F_ONEPACKET)
 			printf(" ops");
+		if (se->flags & IP_VS_SVC_F_SYNPROXY)
+			printf(" -j enable");
+		else
+			printf(" -j disable");
 	} else if (format & FMT_STATS) {
 		printf("%-33s", svc_name);
 		print_largenum(se->stats.conns, format);
@@ -1582,7 +1586,7 @@ print_service_entry(ipvs_service_entry_t *se, unsigned int format)
 			if (se->flags & IP_VS_SVC_F_ONEPACKET)
 				printf(" ops");
 		}
-		if (se->flags & IP_VS_CONN_F_SYNPROXY)
+		if (se->flags & IP_VS_SVC_F_SYNPROXY)
 			printf(" synproxy");
 	}
 	printf("\n");

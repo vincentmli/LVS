@@ -313,10 +313,10 @@ int ipvs_update_service_by_options(ipvs_service_t *svc, unsigned int options)
 	}
 
 	if( options & OPT_SYNPROXY ) {
-		if( svc->flags & IP_VS_CONN_F_SYNPROXY ) {
-			user.flags |= IP_VS_CONN_F_SYNPROXY;
+		if( svc->flags & IP_VS_SVC_F_SYNPROXY ) {
+			user.flags |= IP_VS_SVC_F_SYNPROXY;
 		} else {
-			user.flags &= ~IP_VS_CONN_F_SYNPROXY;
+			user.flags &= ~IP_VS_SVC_F_SYNPROXY;
 		}
 	}
 

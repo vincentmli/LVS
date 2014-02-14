@@ -256,7 +256,16 @@ ip_vs_synproxy_syn_rcv(int af, struct sk_buff *skb,
 	    (svc =
 	     ip_vs_service_get(af, skb->mark, iph->protocol, &iph->daddr,
 			       th->dest))
-	    && (svc->flags & IP_VS_CONN_F_SYNPROXY)) {
+	     && (svc->flags & IP_VS_SVC_F_SYNPROXY)) {
+		/*
+		 * if service's weight is zero (no active realserver),
+		 * then do nothing and drop the packet.
+		 */
+                if(svc->weight == 0) {
+                        IP_VS_INC_ESTATS(ip_vs_esmib, SYNPROXY_NO_DEST);
+                        ip_vs_service_put(svc);
+                        goto syn_rcv_out;
+                }
 		// release service here, because don't use it any all.
 		ip_vs_service_put(svc);
 
