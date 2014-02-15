@@ -188,9 +188,9 @@ static const char* optnames[] = {
 	"syncid",
 	"exact",
 	"ops",
-	"pe" , 
-	"local-address" , 
-	"synproxy" , 
+	"pe", 
+	"local-address", 
+	"synproxy", 
 };
 
 /*
@@ -309,7 +309,7 @@ static void list_all(unsigned int format);
 static void list_timeout(void);
 static void list_daemon(void);
 static int  list_laddrs(ipvs_service_t *svc , int with_title);
-static int list_all_laddrs(void);
+static int  list_all_laddrs(unsigned int format);
 
 static int modprobe_ipvs(void);
 static void check_ipvs_version(void);
@@ -844,6 +844,7 @@ static int process_options(int argc, char **argv, int reading_stdin)
 	case CMD_SAVE:
 		format |= FMT_RULE;
 		list_all(format);
+		result = list_all_laddrs(format);
 		return 0;
 
 	case CMD_FLUSH:
@@ -902,7 +903,7 @@ static int process_options(int argc, char **argv, int reading_stdin)
 		if(options & OPT_SERVICE)
 			result = list_laddrs(&ce.svc , 1);
 		else
-			result = list_all_laddrs();
+			result = list_all_laddrs(format);
 		break;
 	}
 
@@ -1210,7 +1211,9 @@ static void usage_exit(const char *program, const int exit_status)
 		"  --nosort                            disable sorting output of service/server entries\n"
 		"  --sort                              does nothing, for backwards compatibility\n"
 		"  --ops          -o                   one-packet scheduling\n"
-		"  --numeric      -n                   numeric output of addresses and ports\n",
+		"  --numeric      -n                   numeric output of addresses and ports\n"
+		"  --synproxy     -j [enable/disable]  enable/disable ipvs synproxy to defence tcp flag attack\n"
+		"  --vsestablish-timeout -V [timeout]  set up vs private establish state timeout\n",
 		DEF_SCHED);
 
 	exit(exit_status);
@@ -1437,20 +1440,27 @@ static inline char *fwd_switch(unsigned flags)
 	switch (flags & IP_VS_CONN_F_FWD_MASK) {
 	case IP_VS_CONN_F_MASQ:
 		swt = "-m"; break;
+	case IP_VS_CONN_F_FULLNAT:
+		swt = "-b"; break;
 	case IP_VS_CONN_F_TUNNEL:
 		swt = "-i"; break;
 	case IP_VS_CONN_F_LOCALNODE:
 	case IP_VS_CONN_F_DROUTE:
 		swt = "-g"; break;
 	}
-	return swt;
+
+	if(NULL == swt) {
+		printf("The fwd method is not support in ipvsadm, Plz check      the version of ipvsadm or ip_vs kernel\n");
+		exit(1);
+	} else
+		return swt;
 }
 
 
 static void print_largenum(unsigned long long i, unsigned int format)
 {
 	char mytmp[32];
-	size_t len;
+	int len;
 
 	if (format & FMT_EXACT) {
 		len = snprintf(mytmp, 32, "%llu", i);
@@ -1494,7 +1504,7 @@ static void print_title(unsigned int format)
 		       "Prot LocalAddress:Port",
 		       "Weight", "PersistConn", "ActiveConn", "InActConn");
 	else if (!(format & FMT_RULE))
-		printf("Prot LocalAddress:Port Scheduler Flags\n"
+		printf("Prot LocalAddress:Port Scheduler Established(Sec.) Flags\n"
 		       "  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn\n");
 }
 
@@ -1711,13 +1721,35 @@ static void print_service_and_laddrs(struct ip_vs_get_laddrs* d, int with_title)
 		list_laddrs_print_title();
 
 	list_laddrs_print_service(d);
-	for(i = 0 ; i < d->num_laddrs ; i ++){
+	for(i = 0 ; i < d->num_laddrs; i ++){
 		list_laddrs_print_laddr(d->entrytable + i); 
 	}
 
 	return;
 }
 
+static void print_laddrs_rules(struct ip_vs_get_laddrs *d, unsigned int flag_num)
+{
+	int i = 0;
+	char* vname;
+	char  svc_name[64];
+	char  laddr[32];
+
+	/*To get VIP and VPORT numeric or name resolved*/
+	if (!(vname = addrport_to_anyname(d->af, &d->addr, ntohs(d->port),d->protocol, flag_num)))
+		fail(2, "addrport_to_anyname: %s", strerror(errno));
+
+	/*To get Service as formated -- "-t/-u VIP:VPORT" */
+	sprintf(svc_name, "%s %s", d->protocol == IPPROTO_TCP?"-t":"-u", vname);
+
+	for(i = 0; i < d->num_laddrs; i++){
+		/*To Get one local address which is belonged to this svc*/
+		sprintf(laddr, "%u.%u.%u.%u" , PRINT_NIP(d->entrytable[i].addr.ip));
+		printf("-P %s -z %s\n", svc_name, laddr);
+	}
+
+	free(vname);
+}
 
 static int list_laddrs(ipvs_service_t *svc , int with_title)
 {
@@ -1745,7 +1777,7 @@ static int list_laddrs(ipvs_service_t *svc , int with_title)
 }
 
 
-static int list_all_laddrs(void)
+static int list_all_laddrs(unsigned int format)
 {
 	struct ip_vs_get_services *get;
 	struct ip_vs_get_laddrs   *d;
@@ -1762,6 +1794,12 @@ static int list_all_laddrs(void)
 			free(get);
 			fprintf(stderr, "%s\n", ipvs_strerror(errno));
 			return -1;
+		}
+		if(format & FMT_RULE){
+			print_laddrs_rules(d, format & FMT_NUMERIC);
+
+			free(d);
+			continue;
 		}
 		
 		if(i != 0)
