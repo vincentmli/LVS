@@ -431,7 +431,13 @@ struct ip_vs_conn {
 	struct net_device       *dev_inside;
 	unsigned char           src_hwaddr_inside[ETH_ALEN];
 	unsigned char           dst_hwaddr_inside[ETH_ALEN];
-
+	int est_timeout;        /* Now, we decide that every VS
+				 * should have its private
+				 * establish state timeout for user requirement     .
+				 * Each conn inherit this value from VS and
+				 * set this value into conn timer
+				 * when state change to establishment
+				 */
 };
 
 /*
@@ -455,6 +461,7 @@ struct ip_vs_service_user_kern {
 	unsigned flags;		/* virtual service flags */
 	unsigned timeout;	/* persistent timeout in sec */
 	u32 netmask;		/* persistent netmask */
+	unsigned est_timeout;	/* vs private establish state timeout */
 };
 
 struct ip_vs_dest_user_kern {
@@ -511,6 +518,9 @@ struct ip_vs_service {
 	struct ip_vs_scheduler *scheduler;	/* bound scheduler object */
 	rwlock_t sched_lock;	/* lock sched_data */
 	void *sched_data;	/* scheduler application data */
+
+	/* for VS private establish state timeout, it should be inherited by every connection data structure */
+	unsigned est_timeout;
 
 	struct ip_vs_service *svc0;	/* the svc of cpu0 */
 };

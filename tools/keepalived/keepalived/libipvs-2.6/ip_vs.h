@@ -144,6 +144,8 @@ struct ip_vs_service_user {
 	u_int16_t		af;
 	union nf_inet_addr	addr;
 	char			pe_name[IP_VS_PENAME_MAXLEN];
+	unsigned                est_timeout;    /* virtual service private establish timeout */
+
 };
 
 struct ip_vs_dest_kern {
@@ -266,7 +268,7 @@ struct ip_vs_service_entry {
 	u_int16_t		af;
 	union nf_inet_addr	addr;
 	char			pe_name[IP_VS_PENAME_MAXLEN];
-
+	unsigned		est_timeout;    /* vs private establish timeout */
 };
 
 struct ip_vs_dest_entry_kern {
@@ -506,6 +508,7 @@ enum {
 	IPVS_SVC_ATTR_NETMASK,		/* persistent netmask */
 
 	IPVS_SVC_ATTR_STATS,		/* nested attribute for service stats */
+	IPVS_SVC_ATTR_EST_TIMEOUT,	/* establish timeout */
 
 	IPVS_SVC_ATTR_PE_NAME,		/* name of scheduler */
 

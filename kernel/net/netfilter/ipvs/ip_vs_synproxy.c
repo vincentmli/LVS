@@ -636,6 +636,13 @@ ip_vs_synproxy_ack_rcv(int af, struct sk_buff *skb, struct tcphdr *th,
 		}
 
 		/*
+		 * Set private establish state timeout into cp from svc,
+		 * due cp may use its user establish state timeout
+		 * different from sysctl_ip_vs_tcp_timeouts
+		 */
+                (*cpp)->est_timeout = svc->est_timeout;
+
+		/*
 		 * Release service, we don't need it any more.
 		 */
 		ip_vs_service_put(svc);
@@ -830,8 +837,8 @@ ip_vs_synproxy_synack_rcv(struct sk_buff *skb, struct ip_vs_conn *cp,
 	    cp->state == IP_VS_TCP_S_SYN_SENT) {
 		cp->syn_proxy_seq.delta =
 		    htonl(cp->syn_proxy_seq.init_seq) - htonl(th->seq);
-		cp->timeout = pp->timeout_table[cp->state =
-						IP_VS_TCP_S_ESTABLISHED];
+		cp->state = IP_VS_TCP_S_ESTABLISHED;
+		cp->timeout = cp->est_timeout;
 		if (dest) {
 			atomic_inc(&dest->activeconns);
 			atomic_dec(&dest->inactconns);

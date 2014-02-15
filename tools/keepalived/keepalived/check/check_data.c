@@ -256,6 +256,11 @@ dump_vs(void *data)
 	if (atoi(vs->timeout_persistence) > 0)
 		log_message(LOG_INFO, "   persistence timeout = %s",
 		       vs->timeout_persistence);
+	if (!atoi(vs->est_timeout))
+		log_message(LOG_INFO, "   vs privated establish state timeout =      Default");
+	else
+		log_message(LOG_INFO, "   vs privated establish state timeout =      %s",
+			vs->est_timeout);
 	if (vs->granularity_persistence)
 		log_message(LOG_INFO, "   persistence granularity = %s",
 		       inet_ntop2(vs->granularity_persistence));
@@ -324,6 +329,7 @@ alloc_vs(char *ip, char *port)
 
 	new->delay_loop = KEEPALIVED_DEFAULT_DELAY;
 	strncpy(new->timeout_persistence, "0", 1);
+	strncpy(new->est_timeout, "0", 1);
 	new->virtualhost = NULL;
 	new->alpha = 0;
 	new->omega = 0;

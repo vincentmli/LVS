@@ -52,6 +52,7 @@ typedef unsigned int checker_id_t;
 
 /* Daemon dynamic data structure definition */
 #define MAX_TIMEOUT_LENGTH		5
+#define MAX_EST_TIMEOUT_LENGTH		5
 #define KEEPALIVED_DEFAULT_DELAY	(60 * TIMER_HZ) 
 
 /* SSL specific data */
@@ -125,6 +126,7 @@ typedef struct _virtual_server {
 	int ha_suspend;
 	char sched[SCHED_MAX_LENGTH];
 	char timeout_persistence[MAX_TIMEOUT_LENGTH];
+	char est_timeout[MAX_EST_TIMEOUT_LENGTH];
 	unsigned loadbalancing_kind;
 	uint32_t nat_mask;
 	uint32_t granularity_persistence;
@@ -226,6 +228,7 @@ static inline int inaddr_equal(sa_family_t family, void *addr1, void *addr2)
 			 (X)->syn_proxy		      == (Y)->syn_proxy			&&\
 			 !strcmp((X)->sched, (Y)->sched)				&&\
 			 !strcmp((X)->timeout_persistence, (Y)->timeout_persistence)	&&\
+			 !strcmp((X)->est_timeout, (Y)->est_timeout)			&&\
 			 (((X)->vsgname && (Y)->vsgname &&				\
 			   !strcmp((X)->vsgname, (Y)->vsgname)) || 			\
 			  (!(X)->vsgname && !(Y)->vsgname))				&&\

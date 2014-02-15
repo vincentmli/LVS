@@ -353,6 +353,7 @@ enum {
 	IPVS_SVC_ATTR_NETMASK,	/* persistent netmask */
 
 	IPVS_SVC_ATTR_STATS,	/* nested attribute for service stats */
+	IPVS_SVC_ATTR_EST_TIMEOUT,      /* establish timeout */
 	__IPVS_SVC_ATTR_MAX,
 };
 

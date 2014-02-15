@@ -125,6 +125,14 @@ tcp_conn_schedule(int af, struct sk_buff *skb, struct ip_vs_protocol *pp,
 			*verdict = ip_vs_leave(svc, skb, pp);
 			return 0;
 		}
+
+		/*
+		 * Set private establish state timeout into cp from svc,
+		 * due cp may use its user establish state timeout
+		 * different from sysctl_ip_vs_tcp_timeouts
+		 */
+		(*cpp)->est_timeout = svc->est_timeout;
+
 		ip_vs_service_put(svc);
 		return 1;
 	}
@@ -1626,7 +1634,8 @@ set_tcp_state(struct ip_vs_protocol *pp, struct ip_vs_conn *cp,
 	}
 
 	cp->old_state = cp->state;	// old_state called when connection reused
-	cp->timeout = pp->timeout_table[cp->state = new_state];
+	cp->timeout = ((cp->state = new_state) == IP_VS_TCP_S_ESTABLISHED) ?
+							cp->est_timeout : sysctl_ip_vs_tcp_timeouts[new_state];
 }
 
 /*

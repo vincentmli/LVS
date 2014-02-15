@@ -1376,6 +1376,7 @@ ip_vs_add_service(struct ip_vs_service_user_kern *u,
 		this_svc->flags = u->flags;
 		this_svc->timeout = u->timeout * HZ;
 		this_svc->netmask = u->netmask;
+		this_svc->est_timeout = u->est_timeout * HZ;
 
 		/* Init the local address stuff */
 		rwlock_init(&this_svc->laddr_lock);
@@ -1473,6 +1474,7 @@ ip_vs_edit_service(struct ip_vs_service *svc, struct ip_vs_service_user_kern *u)
 		this_svc->flags = u->flags | IP_VS_SVC_F_HASHED;
 		this_svc->timeout = u->timeout * HZ;
 		this_svc->netmask = u->netmask;
+		this_svc->est_timeout = u->est_timeout * HZ;
 
 		spin_unlock_bh(&per_cpu(ip_vs_svc_lock, cpu));
 	}
@@ -3370,6 +3372,7 @@ static int ip_vs_genl_fill_service(struct sk_buff *skb,
 	NLA_PUT(skb, IPVS_SVC_ATTR_FLAGS, sizeof(flags), &flags);
 	NLA_PUT_U32(skb, IPVS_SVC_ATTR_TIMEOUT, svc->timeout / HZ);
 	NLA_PUT_U32(skb, IPVS_SVC_ATTR_NETMASK, svc->netmask);
+	NLA_PUT_U32(skb, IPVS_SVC_ATTR_EST_TIMEOUT, svc->est_timeout / HZ);
 
 	memset((void*)(&tmp_stats), 0, sizeof(struct ip_vs_stats));
 	this_svc = svc->svc0;
@@ -3505,7 +3508,7 @@ static int ip_vs_genl_parse_service(struct ip_vs_service_user_kern *usvc,
 	/* If a full entry was requested, check for the additional fields */
 	if (full_entry) {
 		struct nlattr *nla_sched, *nla_flags, *nla_timeout,
-		    *nla_netmask;
+		    *nla_netmask, *nla_est_timeout;
 		struct ip_vs_flags flags;
 		struct ip_vs_service *svc;
 
@@ -3513,6 +3516,7 @@ static int ip_vs_genl_parse_service(struct ip_vs_service_user_kern *usvc,
 		nla_flags = attrs[IPVS_SVC_ATTR_FLAGS];
 		nla_timeout = attrs[IPVS_SVC_ATTR_TIMEOUT];
 		nla_netmask = attrs[IPVS_SVC_ATTR_NETMASK];
+		nla_est_timeout = attrs[IPVS_SVC_ATTR_EST_TIMEOUT];
 
 		if (!(nla_sched && nla_flags && nla_timeout && nla_netmask))
 			return -EINVAL;
@@ -3536,6 +3540,12 @@ static int ip_vs_genl_parse_service(struct ip_vs_service_user_kern *usvc,
 		usvc->sched_name = nla_data(nla_sched);
 		usvc->timeout = nla_get_u32(nla_timeout);
 		usvc->netmask = nla_get_u32(nla_netmask);
+		if(IPPROTO_TCP == usvc->protocol) {
+			if(nla_est_timeout) /* Be compatible with different version of libipvs2.6 */
+				usvc->est_timeout = nla_get_u32(nla_est_timeout);
+			if(!usvc->est_timeout)
+				usvc->est_timeout = sysctl_ip_vs_tcp_timeouts[IP_VS_TCP_S_ESTABLISHED] / HZ;
+                }
 	}
 
 	return 0;

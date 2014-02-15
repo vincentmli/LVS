@@ -559,6 +559,8 @@ ipvs_set_rule(int cmd, virtual_server * vs, real_server * rs)
 				    , inet_ntop2(inet_sockaddrip4(&vs->addr))
 				    , ntohs(inet_sockaddrport(&vs->addr)));
 
+	srule->est_timeout = atoi(vs->est_timeout);
+
 	if (srule->timeout != 0 || vs->granularity_persistence)
 		srule->flags = IP_VS_SVC_F_PERSISTENT;
 
