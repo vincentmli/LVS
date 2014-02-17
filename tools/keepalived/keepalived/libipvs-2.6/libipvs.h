@@ -96,9 +96,6 @@ extern int ipvs_update_service(ipvs_service_t *svc);
 /* update a virtual service based on option */
 extern int ipvs_update_service_by_options(ipvs_service_t *svc, unsigned int options);
 
-/* config the service's synproxy switch */
-extern int ipvs_update_service_synproxy(ipvs_service_t *svc , int enable);
-
 /* delete a virtual service */
 extern int ipvs_del_service(ipvs_service_t *svc);
 

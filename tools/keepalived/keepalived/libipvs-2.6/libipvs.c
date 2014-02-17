@@ -314,10 +314,6 @@ int ipvs_update_service_by_options(ipvs_service_t *svc, unsigned int options)
 		exit(1);
 	}
 
-	if( options & OPT_VS_EST_TIMEOUT ) {
-		user.est_timeout = svc->est_timeout;
-	}
-
 	ipvs_service_entry_2_user(entry, &user);
 
 	if( options & OPT_SCHEDULER ) {
@@ -345,31 +341,11 @@ int ipvs_update_service_by_options(ipvs_service_t *svc, unsigned int options)
 		user.flags |= IP_VS_SVC_F_ONEPACKET;
 	}
 
+        if( options & OPT_VS_EST_TIMEOUT ) {
+                user.est_timeout = svc->est_timeout;
+        }
+
 	return ipvs_update_service(&user);
-}
-
-int ipvs_update_service_synproxy(ipvs_service_t *svc , int enable)
-{
-	ipvs_service_entry_t *entry;
-
-	if (!(entry = ipvs_get_service(svc->fwmark, svc->af, svc->protocol,
-				       svc->addr, svc->port))) {
-		fprintf(stderr, "%s\n", ipvs_strerror(errno));
-		exit(1);
-	}
-	
-	strcpy(svc->sched_name , entry->sched_name);
-	strcpy(svc->pe_name , entry->pe_name);
-	svc->flags = entry->flags;
-	svc->timeout = entry->timeout;
-	svc->netmask = entry->netmask;
-	
-	if(enable)
-		svc->flags = svc->flags | IP_VS_CONN_F_SYNPROXY;
-	else
-		svc->flags = svc->flags & (~IP_VS_CONN_F_SYNPROXY);
-	
-	return ipvs_update_service(svc);	
 }
 
 int ipvs_del_service(ipvs_service_t *svc)

@@ -53,6 +53,7 @@ stop_check(void)
 	signal_handler_destroy();
 	thread_destroy_master(master);
 	free_checkers_queue();
+	free_vip_queue();
 	free_ssl();
 	ipvs_stop();
 
@@ -111,6 +112,7 @@ start_check(void)
 	/* Processing differential configuration parsing */
 	if (reload)
 		clear_diff_services();
+		free_vip_queue();
 
 	/* Initialize IPVS topology */
 	if (!init_services()) {
@@ -129,6 +131,7 @@ start_check(void)
 	init_interface_linkbeat();
 #endif
 
+	init_vip_queue();
 	/* Register checkers thread */
 	register_checkers_thread();
 }

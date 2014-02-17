@@ -85,13 +85,13 @@ typedef struct _real_server {
 	int alive;
 	list failed_checkers;	/* List of failed checkers */
 	int set;		/* in the IPVS table */
-	int reload_alive;	/* alpha mode will reset rs to unalive. So save the status before reload here */
 } real_server;
 
 /* local ip address group definition */
 typedef struct _local_addr_entry {
 	struct sockaddr_storage addr;
 	uint8_t range;
+	int alive;
 } local_addr_entry;
 
 typedef struct _local_addr_group {
@@ -106,6 +106,7 @@ typedef struct _virtual_server_group_entry {
 	uint8_t range;
 	uint32_t vfwmark;
 	int alive;
+	int laddr_set;
 } virtual_server_group_entry;
 
 typedef struct _virtual_server_group {
@@ -146,6 +147,13 @@ typedef struct _virtual_server {
 	char *local_addr_gname;		/* local ip address group name */
 	char *vip_bind_dev;		/* the interface name,vip bindto */
 } virtual_server;
+
+/* record for add/del vip */
+typedef struct _vip_data {
+	struct sockaddr_storage addr;   /* record ip, ignore port */
+	int set_cnt;                    /* reference counter of the vip */
+	int entry_cnt;
+} vip_data;
 
 /* Configuration data root */
 typedef struct _check_conf_data {
@@ -246,6 +254,7 @@ static inline int inaddr_equal(sa_family_t family, void *addr1, void *addr2)
 /* Global vars exported */
 extern check_conf_data *check_data;
 extern check_conf_data *old_check_data;
+extern list vip_queue;
 
 /* prototypes */
 extern SSL_DATA *alloc_ssl(void);
@@ -263,5 +272,8 @@ extern void set_rsgroup(char *);
 extern check_conf_data *alloc_check_data(void);
 extern void free_check_data(check_conf_data *);
 extern void dump_check_data(check_conf_data *);
+
+extern void free_vip_queue(void);
+extern void init_vip_queue(void);
 
 #endif
