@@ -1,0 +1,105 @@
+		Keepalived manual
+
+I Basic
+
+1. How to start and stop keepalived
+
+start:		service keepalived start
+stop:		service keepalived stop
+restart:	service keepalived restart
+reload:		service keepalived reload
+
+default configuration file /etc/keepalived/keepalived.conf
+after configuration changes, please run reload instead of 
+restart, reload has less impact on production services. 
+restart is to stop and start.
+
+2. Command line argument
+
+A. Generic command line argument 
+
+-P Only run with VRRP subsystem.
+-C Only run with Health-checker subsystem.
+-V Dont remove VRRP VIPs & VROUTEs on daemon stop.
+-I Dont remove IPVS topology on daemon stop.
+-f Use the specified configuration file. Default is /etc/keepalived/keepalived.conf.
+ 
+for example, specify your own configuration file
+
+keepalived -d -f ~/my_keepalived.conf
+
+B. stop, reload
+
+use kill to send signal to keepalived
+
+stop: 		kill -TERM <keepalived pid>
+reload:		kill -HUP <keepalived pid>
+
+Do not recommend to use "killall keepalived" or "kill -9" to kill keepalived.
+this leads to stale state of kernel virtual servers 
+
+II Configurations
+
+! Configuration File for keepalived
+
+global_defs {
+  .....
+}
+
+local_address_group laddr_g1 { # define source address translation pool
+   192.168.3.1
+   192.168.3.2-254 #support ip range
+}
+
+
+virtual_server 192.168.1.169 80 {
+    delay_loop 9
+    lb_algo rr
+    lb_kind FNAT # advance feature to support full address translation
+    persistence_timeout 50
+    syn_proxy # advance feature to support syn proxy/syncookie protection
+    laddr_group_name laddr_g1 # use source address translation pool
+    protocol TCP
+    alpha #alpha mode,real server is down when keepalived startup, only 
+          # added to pool after health check ok
+          #
+    omega #omega mode, execute script when real server is removed
+          # (notify_up, quorum_up config for real server)
+          #
+    quorum 1 #
+    hysteresis 0 # delay options work with quorum
+                 # if higher and less than quorum, then execute 
+                 # quorum_up " ip addr add 1.1.1.1/32 dev lo; ip addr add
+                 # 1.1.2.1/32 dev lo; ip addr add 1.1.2.2/32 dev lo;"
+		 # quorum_down " ip addr del 1.1.1.1/32 dev lo; ip addr del
+		 # 1.1.2.1/32 dev lo; ip addr del 1.1.2.2/32 dev lo;"
+
+    real_server 192.168.3.2 80 {
+        weight 1
+        HTTP_GET {
+            url {
+              path /
+	      # use genhash to generate server response md5 checksum
+	      # genhash -s 192.168.3.2 -p 80 -u / 
+              digest 1bcb6baacc4338d8fe8d7587e3a27a7c 
+            }
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+
+    real_server 192.168.3.3 80 {
+        weight 1
+        HTTP_GET {
+            url {
+              path /
+              digest 1d937e3cd1cdce81f434529ceea3576a
+            }
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+}
+
