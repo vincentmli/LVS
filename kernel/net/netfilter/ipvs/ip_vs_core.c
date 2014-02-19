@@ -1433,6 +1433,8 @@ static int __init ip_vs_init(void)
 		goto cleanup_conn;
 	}
 
+	ip_vs_net_secret_init();
+
 	pr_info("ipvs loaded.\n");
 	return ret;
 
