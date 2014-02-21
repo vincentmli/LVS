@@ -1,0 +1,55 @@
+1, bind local address: no port available
+
+when local address ipv4 last octet is odd number, it will be assigned to 
+odd cpu id, for example
+
+[root@vincent-centos64 ~]# ipvsadm -G
+VIP:VPORT            TOTAL    SNAT_IP              CONFLICTS  CONNS
+10.1.72.39:80        1
+                              10.2.72.41           0          0
+
+
+Feb 21 14:30:54 vincent-centos64 kernel: [146034.527197] IPVS: vip 10.1.72.39:80 add local address 10.2.72.41
+
+Feb 21 14:30:54 vincent-centos64 kernel: [146034.527204] IPVS: local address 10.2.72.41 is assigned to cpu1 <------
+
+and on default centos6.2, it is likely most of the nics interrupt were handled by cpu0 which has no local address
+assigned to cpu0 when the ipv4 local address fourth octet is odd number. thus result in error log:
+
+"bind local address: no port available"
+
+
+Workaround:
+
+
+see https://greenhost.nl/2013/04/10/multi-queue-network-interfaces-with-smp-on-linux/ for reference
+
+we can manipulate the outside and inside nics irq smp_affinity and receiving side steering queue
+to cpu1 
+
+for example:
+
+eth1: <----outside nic 
+
+    inet 10.2.72.39/16 brd 10.2.255.255 scope global eth1
+    inet 10.2.72.40/32 scope global eth1
+    inet 10.2.72.42/32 scope global eth1
+    inet 10.2.72.41/32 scope global eth1
+
+eth2: <-----inside nic
+
+    inet 10.1.72.39/16 brd 10.1.255.255 scope global eth2
+
+
+echo 2 > /sys/class/net/eth2/queues/rx-0/rps_cpus
+echo 2 > /proc/irq/16/smp_affinity
+
+
+echo 2 > /proc/irq/19/smp_affinity
+echo 2 > /sys/class/net/eth1/queues/rx-0/rps_cpus
+
+
+
+
+
+
