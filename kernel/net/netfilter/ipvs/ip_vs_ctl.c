@@ -58,6 +58,7 @@ static DEFINE_MUTEX(__ip_vs_mutex);
 DEFINE_PER_CPU(spinlock_t, ip_vs_svc_lock);
 
 /* lock for state and timeout tables */
+static DEFINE_RWLOCK(__ip_vs_svc_lock);
 static DEFINE_RWLOCK(__ip_vs_securetcp_lock);
 
 /* lock for drop entry handling */
@@ -1144,20 +1145,6 @@ ip_vs_del_dest(struct ip_vs_service *svc, struct ip_vs_dest_user_kern *udest)
 	return 0;
 }
 
-#define LADDR_MASK 0x000000ff
-static inline int laddr_to_cpuid(int af, const union nf_inet_addr *addr)
-{
-	u32 seed;
-
-	if(af == AF_INET6)
-		seed = ntohl(addr->in6.s6_addr32[3]) & LADDR_MASK;
-	else
-		seed = ntohl(addr->ip) & LADDR_MASK;
-
-	return seed % (num_online_cpus() - sysctl_ip_vs_reserve_core) +
-					sysctl_ip_vs_reserve_core;
-}
-
 void ip_vs_laddr_hold(struct ip_vs_laddr *laddr)
 {
 	atomic_inc(&laddr->refcnt);
@@ -1188,9 +1175,6 @@ ip_vs_new_laddr(struct ip_vs_service *svc, struct ip_vs_laddr_user_kern *uladdr,
 	atomic64_set(&laddr->port, 0);
 	atomic_set(&laddr->refcnt, 0);
 	atomic_set(&laddr->conn_counts, 0);
-        laddr->cpuid = laddr_to_cpuid(svc->af, &uladdr->addr);
-        IP_VS_DBG_BUF(0, "local address %s is assigned to cpu%d\n",
-                        IP_VS_DBG_ADDR(svc->af, &uladdr->addr), laddr->cpuid);
 
 	*laddr_p = laddr;
 
@@ -1200,39 +1184,33 @@ ip_vs_new_laddr(struct ip_vs_service *svc, struct ip_vs_laddr_user_kern *uladdr,
 static struct ip_vs_laddr *ip_vs_lookup_laddr(struct ip_vs_service *svc,
 					      const union nf_inet_addr *addr)
 {
-	int cpu;
-	struct ip_vs_service *this_svc;
+
 	struct ip_vs_laddr *laddr;
 
-	this_svc = svc->svc0;
-	for_each_possible_cpu(cpu) {
-		/*
-		 * Find the local address for the given service
-		 */
-		list_for_each_entry(laddr, &this_svc->laddr_list, n_list) {
-			if ((laddr->af == svc->af)
-				&& ip_vs_addr_equal(svc->af, &laddr->addr, addr)) {
-				/* HIT */
-				return laddr;
-			}
+	/*
+	 * Find the local address for the given service
+	 */
+	list_for_each_entry(laddr, &svc->laddr_list, n_list) {
+		if ((laddr->af == svc->af)
+		     && ip_vs_addr_equal(svc->af, &laddr->addr, addr)) {
+			/* HIT */
+			return laddr;
 		}
-		this_svc++;
 	}
 
 	return NULL;
+
 }
 
 static int
 ip_vs_add_laddr(struct ip_vs_service *svc, struct ip_vs_laddr_user_kern *uladdr)
 {
 	struct ip_vs_laddr *laddr;
-	struct ip_vs_service *this_svc;
-	int cpu;
 	int ret;
 
 	IP_VS_DBG_BUF(0, "vip %s:%d add local address %s\n",
-			IP_VS_DBG_ADDR(svc->af, &svc->addr), ntohs(svc->port),
-			IP_VS_DBG_ADDR(svc->af, &uladdr->addr));
+		IP_VS_DBG_ADDR(svc->af, &svc->addr), ntohs(svc->port),
+		IP_VS_DBG_ADDR(svc->af, &uladdr->addr));
 
 	/*
 	 * Check if the local address already exists in the list
@@ -1242,8 +1220,9 @@ ip_vs_add_laddr(struct ip_vs_service *svc, struct ip_vs_laddr_user_kern *uladdr)
 		IP_VS_DBG(1, "%s(): local address already exists\n", __func__);
 		return -EEXIST;
 	}
+
 	/*
-	 * Allocate and initialize the dest structure
+	 * Allocate and initialize the laddr structure
 	 */
 	ret = ip_vs_new_laddr(svc, uladdr, &laddr);
 	if (ret) {
@@ -1255,40 +1234,40 @@ ip_vs_add_laddr(struct ip_vs_service *svc, struct ip_vs_laddr_user_kern *uladdr)
 	 */
 	ip_vs_laddr_hold(laddr);
 
-	cpu = laddr->cpuid;
-	this_svc = svc->svc0 + cpu;
+	write_lock_bh(&__ip_vs_svc_lock);
 
-	spin_lock_bh(&per_cpu(ip_vs_svc_lock, cpu));
+	/*
+	 * Wait until all other svc users go away.
+	 */
 
-	list_add_tail(&laddr->n_list, &this_svc->laddr_list);
-	this_svc->num_laddrs++;
+	list_add_tail(&laddr->n_list, &svc->laddr_list);
+	svc->num_laddrs++;
+
 #ifdef CONFIG_IP_VS_DEBUG
-	/* Dump the destinations */
-	IP_VS_DBG_BUF(0, "      cpu%d svc %s:%d num %d curr %p \n",
-			cpu, IP_VS_DBG_ADDR(svc->af, &svc->addr),
-			ntohs(this_svc->port), this_svc->num_laddrs,
-			this_svc->curr_laddr);
-	list_for_each_entry(laddr, &this_svc->laddr_list, n_list) {
-		IP_VS_DBG_BUF(0, "              laddr %p %s:%d \n",
-				laddr, IP_VS_DBG_ADDR(svc->af, &laddr->addr), 0);
+	/* Dump the local addresses */
+	IP_VS_DBG_BUF(0, " svc %s:%d num %d curr %p \n",
+		IP_VS_DBG_ADDR(svc->af, &svc->addr),
+		ntohs(svc->port), svc->num_laddrs, svc->curr_laddr);
+	list_for_each_entry(laddr, &svc->laddr_list, n_list) {
+		IP_VS_DBG_BUF(0, " laddr %p %s:%d \n",
+			laddr, IP_VS_DBG_ADDR(svc->af, &laddr->addr), 0);
 	}
 #endif
 
-	spin_unlock_bh(&per_cpu(ip_vs_svc_lock, cpu));
+	write_unlock_bh(&__ip_vs_svc_lock);
 
 	return 0;
+
 }
 
 static int
 ip_vs_del_laddr(struct ip_vs_service *svc, struct ip_vs_laddr_user_kern *uladdr)
 {
 	struct ip_vs_laddr *laddr;
-	struct ip_vs_service *this_svc;
-	int cpu;
 
 	IP_VS_DBG_BUF(0, "vip %s:%d del local address %s\n",
-			IP_VS_DBG_ADDR(svc->af, &svc->addr), ntohs(svc->port),
-			IP_VS_DBG_ADDR(svc->af, &uladdr->addr));
+		IP_VS_DBG_ADDR(svc->af, &svc->addr), ntohs(svc->port),
+		IP_VS_DBG_ADDR(svc->af, &uladdr->addr));
 
 	laddr = ip_vs_lookup_laddr(svc, &uladdr->addr);
 
@@ -1297,35 +1276,37 @@ ip_vs_del_laddr(struct ip_vs_service *svc, struct ip_vs_laddr_user_kern *uladdr)
 		return -ENOENT;
 	}
 
-	cpu = laddr->cpuid;
-	this_svc = svc->svc0 + cpu;
+	write_lock_bh(&__ip_vs_svc_lock);
 
-	spin_lock_bh(&per_cpu(ip_vs_svc_lock, cpu));
+	/*
+	 *      Wait until all other svc users go away.
+	 */
 
 	/* update svc->curr_laddr */
-	if (this_svc->curr_laddr == &laddr->n_list)
-		this_svc->curr_laddr = laddr->n_list.next;
+	if (svc->curr_laddr == &laddr->n_list)
+		svc->curr_laddr = laddr->n_list.next;
 	/*
-	 *      Unlink dest from the service
+	 *      Unlink local address from the service
 	 */
 	list_del(&laddr->n_list);
-	this_svc->num_laddrs--;
+	svc->num_laddrs--;
+
 #ifdef CONFIG_IP_VS_DEBUG
-	IP_VS_DBG_BUF(0, "      cpu%d svc %s:%d num %d curr %p \n",
-			cpu, IP_VS_DBG_ADDR(svc->af, &svc->addr),
-			ntohs(svc->port), this_svc->num_laddrs,
-			this_svc->curr_laddr);
-	list_for_each_entry(laddr, &this_svc->laddr_list, n_list) {
+	IP_VS_DBG_BUF(0, "      svc %s:%d num %d curr %p \n",
+		IP_VS_DBG_ADDR(svc->af, &svc->addr),
+		ntohs(svc->port), svc->num_laddrs, svc->curr_laddr);
+	list_for_each_entry(laddr, &svc->laddr_list, n_list) {
 		IP_VS_DBG_BUF(0, "              laddr %p %s:%d \n",
-				laddr, IP_VS_DBG_ADDR(svc->af, &laddr->addr), 0);
+			laddr, IP_VS_DBG_ADDR(svc->af, &laddr->addr), 0);
 	}
 #endif
 
 	ip_vs_laddr_put(laddr);
 
-	spin_unlock_bh(&per_cpu(ip_vs_svc_lock, cpu));
+	write_unlock_bh(&__ip_vs_svc_lock);
 
 	return 0;
+
 }
 
 /*

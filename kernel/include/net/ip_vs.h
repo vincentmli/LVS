@@ -569,7 +569,6 @@ struct ip_vs_dest {
 struct ip_vs_laddr {
 	struct list_head n_list;	/* for the local address in the service */
 	u16 af;			/* address family */
-	u16 cpuid;		/* record the cpu laddr has been assigned */
 	union nf_inet_addr addr;	/* ip address */
 	atomic64_t port;	/* port counts */
 	atomic_t refcnt;	/* reference count */
